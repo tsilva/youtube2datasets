@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "youtube2datasets"
+version = "0.1.0"
+description = "Turn YouTube longplays into Hugging Face-ready image datasets."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Codex" },
+]
+dependencies = [
+  "datasets>=3.4.0",
+  "Pillow>=11.0.0",
+  "riptube==0.1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+]
+
+[project.scripts]
+youtube2datasets = "youtube2datasets.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/youtube2datasets"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
