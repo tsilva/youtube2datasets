@@ -14,6 +14,8 @@ class TimeRange:
 class SourceSpec:
     kind: str
     value: str
+    stable_id_hint: str | None = None
+    metadata: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

@@ -41,12 +41,61 @@ def extract_youtube_video_id(url: str) -> str | None:
     return None
 
 
+def normalize_playlist_url(url: str) -> str:
+    parsed = urlparse(url)
+    list_id = parse_qs(parsed.query).get("list", [None])[0]
+    if list_id:
+        return f"https://www.youtube.com/playlist?list={list_id}"
+    return url
+
+
 def fetch_youtube_metadata(url: str, cookie_file: str | None = None) -> dict:
     options = {"quiet": True, "skip_download": True, "no_warnings": True}
     if cookie_file:
         options["cookiefile"] = cookie_file
     with yt_dlp.YoutubeDL(options) as ydl:
         return ydl.extract_info(url, download=False)
+
+
+def fetch_playlist_metadata(url: str, cookie_file: str | None = None) -> dict:
+    options = {
+        "quiet": True,
+        "skip_download": True,
+        "no_warnings": True,
+        "extract_flat": True,
+        "lazy_playlist": False,
+    }
+    if cookie_file:
+        options["cookiefile"] = cookie_file
+    with yt_dlp.YoutubeDL(options) as ydl:
+        return ydl.extract_info(normalize_playlist_url(url), download=False)
+
+
+def playlist_sources(url: str, cookie_file: str | None = None) -> tuple[dict, list[dict]]:
+    metadata = fetch_playlist_metadata(url, cookie_file=cookie_file)
+    entries = metadata.get("entries") or []
+    resolved_entries: list[dict] = []
+    for entry in entries:
+        if not entry:
+            continue
+        entry_id = entry.get("id")
+        entry_url = entry.get("webpage_url") or entry.get("url")
+        if entry_url and entry_url.startswith("https://www.youtube.com/watch"):
+            normalized_url = entry_url
+        elif entry_id:
+            normalized_url = f"https://www.youtube.com/watch?v={entry_id}"
+        else:
+            continue
+        resolved_entries.append(
+            {
+                "url": normalized_url,
+                "id": entry_id,
+                "title": entry.get("title"),
+                "playlist_title": metadata.get("title"),
+                "playlist_id": metadata.get("id"),
+            }
+        )
+    return metadata, resolved_entries
 
 
 def locate_downloaded_video(download_dir: Path, stable_id: str) -> Path:
@@ -65,9 +114,10 @@ def resolve_youtube_video(
     download_dir: Path,
     cookie_file: str | None = None,
     force_download: bool = False,
+    stable_id_hint: str | None = None,
 ) -> ResolvedVideo:
     metadata = fetch_youtube_metadata(url, cookie_file=cookie_file)
-    stable_id = slugify(metadata.get("id") or extract_youtube_video_id(url) or hash_suffix(url))
+    stable_id = slugify(metadata.get("id") or stable_id_hint or extract_youtube_video_id(url) or hash_suffix(url))
     existing_matches = sorted(
         path
         for path in download_dir.glob(f"{stable_id}.*")

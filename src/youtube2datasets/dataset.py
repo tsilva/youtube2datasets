@@ -5,10 +5,17 @@ import json
 import os
 import shutil
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
-from youtube2datasets.downloader import ResolvedVideo, resolve_local_video, resolve_youtube_video
-from youtube2datasets.hf import upload_imagefolder_dataset
+from youtube2datasets.downloader import (
+    ResolvedVideo,
+    extract_youtube_video_id,
+    resolve_local_video,
+    resolve_youtube_video,
+    slugify,
+)
+from youtube2datasets.hf import dataset_repo_exists, upload_imagefolder_dataset
 from youtube2datasets.media import compute_resized_dimensions, extract_frames, ffprobe_video
 from youtube2datasets.models import PrepareConfig, SourceSpec
 from youtube2datasets.timecode import format_timecode, is_in_ranges
@@ -34,6 +41,7 @@ def resolve_source(source: SourceSpec, config: PrepareConfig) -> ResolvedVideo:
             download_dir=config.download_dir,
             cookie_file=config.cookie_file,
             force_download=config.force_download,
+            stable_id_hint=source.stable_id_hint,
         )
     if source.kind == "file":
         return resolve_local_video(source.value)
@@ -49,6 +57,28 @@ def append_jsonl(path: Path, records: list[dict]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         for record in records:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def infer_source_stable_id(source: SourceSpec) -> str:
+    if source.stable_id_hint:
+        return slugify(source.stable_id_hint)
+    if source.kind == "url":
+        video_id = extract_youtube_video_id(source.value)
+        if video_id:
+            return slugify(video_id)
+        return slugify(source.value)
+    if source.kind == "file":
+        return slugify(Path(source.value).expanduser().stem)
+    raise ValueError(f"Unsupported source kind: {source.kind}")
+
+
+def build_video_repo_id(repo_prefix: str, stable_id: str) -> str:
+    if "/" not in repo_prefix:
+        raise ValueError("--repo-prefix must include the namespace, for example 'tsilva/zx-spectrum-worldoflongplays'.")
+    owner, prefix = repo_prefix.split("/", 1)
+    if not owner or not prefix:
+        raise ValueError("--repo-prefix must include the namespace and repo prefix.")
+    return f"{owner}/{slugify(f'{prefix}-{stable_id}')}"
 
 
 def prepare_dataset(config: PrepareConfig, sources: list[SourceSpec]) -> dict:
@@ -153,6 +183,9 @@ def prepare_dataset(config: PrepareConfig, sources: list[SourceSpec]) -> dict:
                 }
                 for tag_key, tag_value in config.tags.items():
                     record[f"tag_{sanitize_tag_key(tag_key)}"] = tag_value
+                for meta_key, meta_value in source.metadata.items():
+                    if meta_value:
+                        record[f"source_{sanitize_tag_key(meta_key)}"] = meta_value
 
                 records.append(record)
                 kept_frames += 1
@@ -172,6 +205,7 @@ def prepare_dataset(config: PrepareConfig, sources: list[SourceSpec]) -> dict:
                 ],
                 "probe": probe,
                 "source_metadata": resolved.metadata,
+                "source_spec_metadata": source.metadata,
             }
             per_video_summaries.append(summary)
             total_frames += kept_frames
@@ -202,3 +236,64 @@ def prepare_dataset(config: PrepareConfig, sources: list[SourceSpec]) -> dict:
         upload_imagefolder_dataset(output_dir, repo_id=repo_id, private=config.private, token=token)
 
     return manifest
+
+
+def prepare_playlist_datasets(
+    config: PrepareConfig,
+    sources: list[SourceSpec],
+    repo_prefix: str | None = None,
+    skip_existing_hf: bool = False,
+) -> dict:
+    if not sources:
+        raise ValueError("No playlist entries were found.")
+    if (config.push_to_hub or skip_existing_hf) and not repo_prefix:
+        raise ValueError("--repo-prefix is required when using playlist upload or --skip-existing-hf.")
+
+    token = config.hf_token or os.getenv("HF_TOKEN")
+    jobs: list[dict] = []
+    total_frames = 0
+
+    for source in sources:
+        stable_id = infer_source_stable_id(source)
+        repo_id = build_video_repo_id(repo_prefix, stable_id) if repo_prefix else None
+        output_dir = config.output_dir / stable_id
+
+        if skip_existing_hf and repo_id and dataset_repo_exists(repo_id, token=token):
+            jobs.append(
+                {
+                    "source_url": source.value,
+                    "stable_id": stable_id,
+                    "repo_id": repo_id,
+                    "output_dir": str(output_dir.resolve()),
+                    "status": "skipped_existing_hf",
+                }
+            )
+            continue
+
+        job_config = replace(
+            config,
+            output_dir=output_dir,
+            repo_id=repo_id,
+        )
+        manifest = prepare_dataset(job_config, [source])
+        total_frames += manifest["total_frames"]
+        jobs.append(
+            {
+                "source_url": source.value,
+                "stable_id": stable_id,
+                "repo_id": repo_id,
+                "output_dir": str(output_dir.resolve()),
+                "status": "prepared",
+                "total_frames": manifest["total_frames"],
+                "video_title": manifest["videos"][0]["source_metadata"].get("title"),
+            }
+        )
+
+    return {
+        "playlist_output_root": str(config.output_dir.resolve()),
+        "total_jobs": len(jobs),
+        "prepared_jobs": sum(1 for job in jobs if job["status"] == "prepared"),
+        "skipped_jobs": sum(1 for job in jobs if job["status"] != "prepared"),
+        "total_frames": total_frames,
+        "jobs": jobs,
+    }

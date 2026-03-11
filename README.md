@@ -79,9 +79,31 @@ uv run youtube2datasets prepare \
   --repo-id your-name/zx-spectrum-longplays
 ```
 
+## Prepare a playlist
+
+For playlists, the tool creates one dataset per video under the output root. If you also pass a repo prefix, each video gets its own dataset repo named `<prefix>-<video_id>`.
+
+```bash
+uv run youtube2datasets prepare-playlist \
+  --playlist-url 'https://www.youtube.com/watch?v=uWSw5ANWbs8&list=PLKdDVjheyYJMCHjdI9eaSlekw5quM0vXn' \
+  --output-dir ./out/worldoflongplays-playlist \
+  --download-dir ./out/downloads \
+  --sample-every 2 \
+  --target-width 256 \
+  --target-height 192 \
+  --push-to-hub \
+  --repo-prefix tsilva/zx-spectrum-worldoflongplays \
+  --skip-existing-hf \
+  --tag platform=zx-spectrum \
+  --tag source=worldoflongplays
+```
+
+That command will skip playlist entries whose target Hub dataset already exists, for example `tsilva/zx-spectrum-worldoflongplays-<video_id>`.
+
 ## Notes
 
 - `--skip-range` uses absolute timestamps from the source video.
 - If only one resize dimension is supplied, frames are scaled by that dimension.
 - If both resize dimensions are supplied, frames are fit inside that bounding box without cropping.
 - `HF_TOKEN` is used automatically when pushing to the Hub unless `--hf-token` is provided.
+- `prepare-playlist` adds playlist metadata to each record as `source_playlist_id`, `source_playlist_title`, and `source_playlist_entry_title`.
