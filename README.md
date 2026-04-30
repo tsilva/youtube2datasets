@@ -1,27 +1,31 @@
 # youtube2datasets
 
-`youtube2datasets` downloads YouTube videos, samples frames into lossless WebP images, writes Hugging Face `imagefolder` metadata, and can push the dataset to the Hub directly.
+`youtube2datasets` is a Python CLI for turning YouTube videos, playlists, or local video files into Hugging Face-ready image datasets.
 
-The initial workflow is biased toward longplay capture jobs, such as ZX Spectrum videos from [World of Longplays](https://www.youtube.com/@worldoflongplays).
+It downloads or reads source video, samples frames at fixed intervals, stores lossless WebP images, writes `imagefolder` metadata, and can push the prepared dataset to the Hugging Face Hub.
 
-## Features
-
-- Download videos with `riptube==0.1.1`
-- Sample frames at fixed time intervals
-- Restrict extraction to a clip window with `--start` / `--end`
-- Skip unwanted time ranges with repeated `--skip-range`
-- Resize into a target bounding box while preserving aspect ratio
-- Save every frame as lossless WebP
-- Emit Hugging Face-friendly `imagefolder` metadata
-- Push the dataset to the Hub with a separate command or inline during prepare
-
-## Installation
+## Install
 
 ```bash
-uv sync
+git clone https://github.com/tsilva/youtube2datasets.git
+cd youtube2datasets
+uv sync --extra dev
+uv run youtube2datasets --help
 ```
 
-## Prepare a dataset
+Use `uv run youtube2datasets ...` from the repo root.
+
+## Commands
+
+```bash
+uv run youtube2datasets --help            # show CLI help
+uv run youtube2datasets prepare ...       # build one imagefolder dataset
+uv run youtube2datasets prepare-playlist  # build one dataset per playlist video
+uv run youtube2datasets upload ...        # push a prepared dataset to the Hub
+uv run pytest                             # run tests
+```
+
+Prepare a dataset from a YouTube URL:
 
 ```bash
 uv run youtube2datasets prepare \
@@ -31,36 +35,13 @@ uv run youtube2datasets prepare \
   --sample-every 10 \
   --start 00:01:00 \
   --skip-range 00:00:00-00:00:45 \
-  --skip-range 01:22:10-01:24:00 \
   --target-width 512 \
   --target-height 384 \
   --tag platform=zx-spectrum \
   --tag source=worldoflongplays
 ```
 
-Output layout:
-
-```text
-out/zx-spectrum-dataset/
-  train/
-    images/
-      te8T6FzK_2I_000000.webp
-      ...
-    metadata.jsonl
-  manifest.json
-  video_metadata/
-    te8T6FzK_2I.json
-```
-
-The generated folder can be loaded locally with:
-
-```python
-from datasets import load_dataset
-
-dataset = load_dataset("imagefolder", data_dir="out/zx-spectrum-dataset")
-```
-
-## Upload to Hugging Face
+Upload a prepared dataset:
 
 ```bash
 uv run youtube2datasets upload \
@@ -68,20 +49,7 @@ uv run youtube2datasets upload \
   --repo-id your-name/zx-spectrum-longplays
 ```
 
-Or prepare and upload in one shot:
-
-```bash
-uv run youtube2datasets prepare \
-  --url https://www.youtube.com/watch?v=te8T6FzK_2I \
-  --output-dir ./out/zx-spectrum-dataset \
-  --sample-every 10 \
-  --push-to-hub \
-  --repo-id your-name/zx-spectrum-longplays
-```
-
-## Prepare a playlist
-
-For playlists, the tool creates one dataset per video under the output root. If you also pass a repo prefix, each video gets its own dataset repo named `<prefix>-<video_id>`.
+Prepare a playlist as separate per-video datasets:
 
 ```bash
 uv run youtube2datasets prepare-playlist \
@@ -92,18 +60,24 @@ uv run youtube2datasets prepare-playlist \
   --target-width 256 \
   --target-height 192 \
   --push-to-hub \
-  --repo-prefix tsilva/zx-spectrum-worldoflongplays \
-  --skip-existing-hf \
-  --tag platform=zx-spectrum \
-  --tag source=worldoflongplays
+  --repo-prefix your-name/zx-spectrum-worldoflongplays \
+  --skip-existing-hf
 ```
-
-That command will skip playlist entries whose target Hub dataset already exists, for example `tsilva/zx-spectrum-worldoflongplays-<video_id>`.
 
 ## Notes
 
-- `--skip-range` uses absolute timestamps from the source video.
-- If only one resize dimension is supplied, frames are scaled by that dimension.
-- If both resize dimensions are supplied, frames are fit inside that bounding box without cropping.
-- `HF_TOKEN` is used automatically when pushing to the Hub unless `--hf-token` is provided.
-- `prepare-playlist` adds playlist metadata to each record as `source_playlist_id`, `source_playlist_title`, and `source_playlist_entry_title`.
+- Requires Python 3.11 or newer, `uv`, and `ffmpeg`/`ffprobe` on `PATH`.
+- YouTube downloads use `riptube==0.1.1`; metadata and playlist expansion use `yt-dlp`.
+- Inputs can be repeated with `--url`, listed in `--urls-file`, or provided as local videos with `--video-file`.
+- Output directories contain a split folder with `images/` and `metadata.jsonl`, plus `manifest.json` and `video_metadata/*.json`.
+- Resize options fit frames inside the requested bounds without cropping. If only one dimension is supplied, frames scale by that dimension.
+- `--skip-range` uses absolute timestamps from the source video. It may be repeated.
+- Hub uploads use `--hf-token` when provided, otherwise `HF_TOKEN`.
+
+## Architecture
+
+![youtube2datasets architecture diagram](./architecture.png)
+
+## License
+
+[MIT](pyproject.toml)
