@@ -1,4 +1,6 @@
-# youtube2datasets
+<div align="center">
+  <img src="./logo.png" alt="youtube2datasets" width="420" />
+</div>
 
 `youtube2datasets` is a Python CLI for turning YouTube videos, playlists, or local video files into Hugging Face-ready image datasets.
 
