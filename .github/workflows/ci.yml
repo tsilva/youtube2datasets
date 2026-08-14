@@ -22,6 +22,8 @@ jobs:
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
         with:
           cache: true
+      - name: Install FFmpeg runtime prerequisite
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
       - run: uv lock --check --no-config --exclude-newer "7 days"
       - run: uv sync --frozen --extra dev --no-config
       - run: uv audit --frozen --no-config
