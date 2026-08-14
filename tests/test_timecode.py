@@ -1,4 +1,9 @@
-from youtube2datasets.timecode import format_timecode, is_in_ranges, parse_time_range, parse_timecode
+from youtube2datasets.timecode import (
+    format_timecode,
+    is_in_ranges,
+    parse_time_range,
+    parse_timecode,
+)
 
 
 def test_parse_timecode_accepts_seconds_and_hms() -> None:
