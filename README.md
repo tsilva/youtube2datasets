@@ -87,3 +87,5 @@ uv run youtube2datasets prepare-playlist \
 ## License
 
 [MIT](pyproject.toml)
+
+[MIT License](LICENSE).
