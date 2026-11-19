@@ -5,7 +5,12 @@ import json
 import os
 from pathlib import Path
 
-from youtube2datasets.dataset import prepare_dataset, prepare_playlist_datasets
+from youtube2datasets.dataset import (
+    infer_source_stable_id,
+    plan_playlist_datasets,
+    prepare_dataset,
+    prepare_playlist_datasets,
+)
 from youtube2datasets.downloader import playlist_sources
 from youtube2datasets.hf import upload_imagefolder_dataset
 from youtube2datasets.models import PrepareConfig, SourceSpec
@@ -100,6 +105,17 @@ def add_playlist_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Skip playlist entries whose target dataset repo already exists on the Hub.",
     )
+    parser.add_argument(
+        "--plan",
+        action="store_true",
+        help="List per-video dataset IDs and directories without downloading video or contacting the Hub.",
+    )
+    parser.add_argument(
+        "--only-video-id",
+        action="append",
+        default=[],
+        help="Prepare only this stable ID from the playlist plan. May be repeated.",
+    )
 
 
 def add_upload_arguments(parser: argparse.ArgumentParser) -> None:
@@ -164,7 +180,29 @@ def build_prepare_config(args: argparse.Namespace) -> PrepareConfig:
     )
 
 
+def select_playlist_entries(sources: list[SourceSpec], video_ids: list[str]) -> list[SourceSpec]:
+    if not video_ids:
+        return sources
+    expected = set(video_ids)
+    if len(expected) != len(video_ids):
+        raise ValueError("--only-video-id values must be unique.")
+    matches: dict[str, SourceSpec] = {}
+    for source in sources:
+        identifier = infer_source_stable_id(source)
+        if identifier in expected:
+            if identifier in matches:
+                raise ValueError("A selected video ID occurs more than once in the playlists.")
+            matches[identifier] = source
+    if matches.keys() != expected:
+        raise ValueError("A selected video ID is absent from the playlists.")
+    return list(matches.values())
+
+
 def run_prepare_playlist(args: argparse.Namespace) -> int:
+    if (args.plan or args.only_video_id) and (args.push_to_hub or args.skip_existing_hf):
+        raise ValueError("Playlist planning and selection do not take Hub upload or lookup flags.")
+    if args.plan and not args.repo_prefix:
+        raise ValueError("Playlist planning requires --repo-prefix.")
     config = build_prepare_config(args)
     sources: list[SourceSpec] = []
     playlist_summaries: list[dict] = []
@@ -192,12 +230,16 @@ def run_prepare_playlist(args: argparse.Namespace) -> int:
                 )
             )
 
-    summary = prepare_playlist_datasets(
-        config,
-        sources,
-        repo_prefix=args.repo_prefix,
-        skip_existing_hf=args.skip_existing_hf,
-    )
+    selected = select_playlist_entries(sources, args.only_video_id)
+    if args.plan:
+        summary = plan_playlist_datasets(config, selected, args.repo_prefix)
+    else:
+        summary = prepare_playlist_datasets(
+            config,
+            selected,
+            repo_prefix=args.repo_prefix,
+            skip_existing_hf=args.skip_existing_hf,
+        )
     summary["playlists"] = playlist_summaries
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

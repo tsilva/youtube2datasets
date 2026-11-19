@@ -238,6 +238,36 @@ def prepare_dataset(config: PrepareConfig, sources: list[SourceSpec]) -> dict:
     return manifest
 
 
+def playlist_target(config: PrepareConfig, source: SourceSpec, repo_prefix: str | None) -> dict:
+    stable_id = infer_source_stable_id(source)
+    root = config.output_dir.resolve()
+    directory = root / stable_id
+    if stable_id in {".", ".."} or directory.resolve() != directory:
+        raise ValueError("Playlist dataset directory must be a direct, non-symlinked child of the output root.")
+    return {
+        "source_url": source.value,
+        "stable_id": stable_id,
+        "repo_id": build_video_repo_id(repo_prefix, stable_id) if repo_prefix else None,
+        "output_dir": str(directory),
+    }
+
+
+def plan_playlist_datasets(
+    config: PrepareConfig, sources: list[SourceSpec], repo_prefix: str,
+) -> dict:
+    """Map playlist metadata to local directories and Hub IDs without downloading videos."""
+    if not sources or not repo_prefix:
+        raise ValueError("Playlist planning requires entries and --repo-prefix.")
+    jobs = [playlist_target(config, source, repo_prefix) for source in sources]
+    if len({job["stable_id"] for job in jobs}) != len(jobs):
+        raise ValueError("Playlist entries produce duplicate dataset IDs.")
+    return {
+        "playlist_output_root": str(config.output_dir.resolve()),
+        "total_jobs": len(jobs),
+        "jobs": jobs,
+    }
+
+
 def prepare_playlist_datasets(
     config: PrepareConfig,
     sources: list[SourceSpec],
@@ -254,17 +284,14 @@ def prepare_playlist_datasets(
     total_frames = 0
 
     for source in sources:
-        stable_id = infer_source_stable_id(source)
-        repo_id = build_video_repo_id(repo_prefix, stable_id) if repo_prefix else None
-        output_dir = config.output_dir / stable_id
+        target = playlist_target(config, source, repo_prefix)
+        repo_id = target["repo_id"]
+        output_dir = config.output_dir / target["stable_id"]
 
         if skip_existing_hf and repo_id and dataset_repo_exists(repo_id, token=token):
             jobs.append(
                 {
-                    "source_url": source.value,
-                    "stable_id": stable_id,
-                    "repo_id": repo_id,
-                    "output_dir": str(output_dir.resolve()),
+                    **target,
                     "status": "skipped_existing_hf",
                 }
             )
@@ -279,10 +306,7 @@ def prepare_playlist_datasets(
         total_frames += manifest["total_frames"]
         jobs.append(
             {
-                "source_url": source.value,
-                "stable_id": stable_id,
-                "repo_id": repo_id,
-                "output_dir": str(output_dir.resolve()),
+                **target,
                 "status": "prepared",
                 "total_frames": manifest["total_frames"],
                 "video_title": manifest["videos"][0]["source_metadata"].get("title"),

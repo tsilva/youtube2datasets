@@ -70,6 +70,12 @@ uv run youtube2datasets prepare-playlist \
   --skip-existing-hf
 ```
 
+
+Use `prepare-playlist --plan` with the same playlist and repository prefix to
+list each dataset path and repository ID before extracting frames. Repeat
+`--only-video-id` to prepare selected entries, then use `upload` on each
+selected dataset directory.
+
 ## Notes
 
 - Requires Python 3.11 or newer, `uv`, and `ffmpeg`/`ffprobe` on `PATH`.
